@@ -1,52 +1,45 @@
-// frames per second
-const FPS = 30;
-// friction coefficient of space (0 = none, 1 = lots)
-const FRICTION = .7;
-// starting number of lifes
-const GAME_LIVES = 3;
-// maximum distance laser can travel as fraction of screen width
-const LASER_DIST = .6;
-// laser's explosion duration time in seconds
-const LASER_EXPLODE_DUR = .2;
-// maximum number of laser on screen as once
-const LASER_MAX = 10;
-// speed of lasers in pixels per second
-const LASER_SPD = 500;
-// jaggednes of the asteroids (0 = none, 1 = lots)
-const ROIDS_JAG = 0.4;
-// starting number of asteroids
-const ROIDS_NUM = 1;
-// starting size of asteroids in pixels
-const ROIDS_SIZE = 100;
-// max starting speed of asteroids in pixels per second
-const ROIDS_SPD = 50;
-// average number of vertices on each asteroid
-const ROIDS_VERT = 10;
-// ship's blink duration time during invisibility in seconds
-const SHIP_BLINK_DUR = .1;
-// ship's explosion duration time in seconds
-const SHIP_EXPLODE_DUR = .5;
-// ship's invisibility duration time in seconds
-const SHIP_INV_DUR = 3;
-// ship's height in pixels
-const SHIP_SIZE = 30;
-// acceleration of the ship in pixels per second
-const SHIP_THRUST = 5; 
-// rotation speed in degrees per second
-const TURN_SPEED = 360;
-// show and hide collision bounding
-const SHOW_BOUNDING = false;
-// text fade time in seconds
-const TEXT_FADE_TIME = 2.5;
-// text font height in pixels
-const TEXT_SIZE = 40;
+const FPS = 30; // frames per second
+const FRICTION = .7; // friction coefficient of space (0 = none, 1 = lots)
+const GAME_LIVES = 3; // starting number of lifes
+const LASER_DIST = .6; // maximum distance laser can travel as fraction of screen width
+const LASER_EXPLODE_DUR = .2; // laser's explosion duration time in seconds
+const LASER_MAX = 10; // maximum number of laser on screen as once
+const LASER_SPD = 500; // speed of lasers in pixels per second
+const ROIDS_JAG = 0.4; // jaggednes of the asteroids (0 = none, 1 = lots)
+const ROIDS_PTS = 20; // Poits scored for a asteroid
+const ROIDS_NUM = 1; // starting number of asteroids
+const ROIDS_SIZE = 100; // starting size of asteroids in pixels
+const ROIDS_SPD = 50; // max starting speed of asteroids in pixels per second
+const ROIDS_VERT = 10; // average number of vertices on each asteroid
+const SAVE_KEY_SCORE = 'highscore'; // save key for local storage of high score
+const SHIP_BLINK_DUR = .1; // ship's blink duration time during invisibility in seconds
+const SHIP_EXPLODE_DUR = .5; // ship's explosion duration time in seconds
+const SHIP_INV_DUR = 3; // ship's invisibility duration time in seconds
+const SHIP_SIZE = 30; // ship's height in pixels
+const MUSIC_ON = true // allow the music to play
+const SOUND_ON = false // allow the sounds to play
+const SHIP_THRUST = 5; // acceleration of the ship in pixels per second
+const TURN_SPEED = 360; // rotation speed in degrees per second
+const SHOW_BOUNDING = false; // show and hide collision bounding
+const TEXT_FADE_TIME = 2.5; // text fade time in seconds
+const TEXT_SIZE = 40; // text font height in pixels
 
 /** @type {HTMLCanvasElement} */
 let canva = document.getElementById('gameCanvas');
 let ctx = canva.getContext('2d');
 
+// set up sound efects
+let fxLaser = new Sound('sounds/laser.m4a', 5, .5);
+let fxThrust = new Sound('sounds/thrust.m4a');
+let fxHit = new Sound('sounds/hit.m4a', 5);
+let fxExplode = new Sound('sounds/explode.m4a');
+
+// set up the music
+let music = new Music('sounds/music-low.m4a', 'sounds/music-high.m4a');
+let roidsLeft, roidsTotal;
+
 // set up the game parameters
-let level, roids, ship, text, textAlpha, lives;
+let level, roids, score, highScore, ship, text, textAlpha, lives;
 newGame();
 
 // set up event handlers
@@ -58,6 +51,8 @@ setInterval(update, 1000 / FPS);
 
 function createAsteroidBelt () {
   roids = [];
+  roidsTotal = (ROIDS_NUM + level) * 7;
+  roidsLeft = roidsTotal;
   let x, y;
   for(var i = 0; i < ROIDS_NUM + level; i ++){
     do {
@@ -77,19 +72,29 @@ function destroyAsteroid(index) {
   if (r == Math.ceil(ROIDS_SIZE / 2)) {
     roids.push(newAsteroid(x, y, Math.ceil(ROIDS_SIZE / 4)));
     roids.push(newAsteroid(x, y, Math.ceil(ROIDS_SIZE / 4)));
-
-    roids.splice(index, 1);
+    score += ROIDS_PTS;
   } else if (r == Math.ceil(ROIDS_SIZE / 4)) {
     roids.push(newAsteroid(x, y, Math.ceil(ROIDS_SIZE / 8)));
     roids.push(newAsteroid(x, y, Math.ceil(ROIDS_SIZE / 8)));
+    score += ROIDS_PTS * 2.5;
+  } else {
+    score += ROIDS_PTS * 5;
+  }
 
-    roids.splice(index, 1);
+  // check high score
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem(SAVE_KEY_SCORE, highScore);
   }
+
   // destroy the asteroid
-  if (r == Math.ceil(ROIDS_SIZE / 8)) {
-    roids.splice(index, 1);
-  }
-  
+  roids.splice(index, 1);
+  fxHit.play();
+
+  // calculate the ratio of remaining asteroids to determine music tempo
+  roidsLeft--;
+  music.setAsteroidRatio(roidsLeft == 0 ? 1 : roidsLeft / roidsTotal);
+
   // new level when no more asteroids
   if(roids.length == 0) {
     level ++;
@@ -123,6 +128,7 @@ function drawShip(x, y, a, color = 'white') {
 
 function explodeShip() {
   ship.explodeTime = Math.ceil(SHIP_EXPLODE_DUR * FPS);
+  fxExplode.play();
 }
 
 function gameOver() {
@@ -203,8 +209,17 @@ function newAsteroid(x, y, r) {
 
 function newGame() {
   level = 0;
+  score = 0;
   lives = GAME_LIVES;
   ship = newShip();
+
+  // get the high score from local storage
+  let scoreStr = localStorage.getItem(SAVE_KEY_SCORE);
+  if (scoreStr == null) {
+    highScore = 0;
+  } else {
+    highScore = parseInt(scoreStr);
+  }
   newLevel();
 }
 
@@ -246,14 +261,71 @@ function shootLaser () {
       dist: 0,
       explodeTime: 0,
     });
+    fxLaser.play();
   }
   // prevent further shooting
   ship.canShoot = false;
 }
 
+function Music(srcLow, srcHigh) {
+  this.soundLow = new Audio(srcLow);
+  this.soundHigh = new Audio(srcHigh);
+  this.low = true;
+  this.tempo = 1.0; // seconds per beat
+  this.beatTime = 0; // frames left until next beat
+
+  this.play = function() {
+    if (MUSIC_ON) {
+      if (this.low) {
+        this.soundLow.play();
+      } else {
+        this.soundHigh.play();
+      }
+      this.low = !this.low;
+    }
+  }
+
+  this.setAsteroidRatio = function(ratio) {
+    this.tempo = 1.0 - .75 *  (1.0 - ratio);
+  }
+
+  this.tick = function() {
+    if(this. beatTime == 0) {
+      this.play();
+      this.beatTime = Math.ceil(this.tempo * FPS);
+    } else {
+      this.beatTime--;
+    }
+  }
+}
+
+function Sound(src, maxStreams = 1, vol = 1.0){
+  this.streamNum = 0;
+  this.streams = [];
+
+  for (let i = 0; i < maxStreams; i++) {
+    this.streams.push(new Audio(src));
+    this.streams[i].volume = vol;
+  }
+
+  this.play = function() {
+    if (SOUND_ON) {
+      this.streamNum = (this.streamNum + 1) % maxStreams;
+      this.streams[this.streamNum].play()
+    }
+  }
+  this.stop = function() {
+    this.streams[this.streamNum].pause();
+    this.streams[this.streamNum].currentTime = 0;
+  }
+}
+
 function update () {
   let blinkOn = ship.blinkNum % 2 == 0;
   let exploding = ship.explodeTime > 0;
+
+  // tick the music
+  music.tick();
 
   // draw space
   ctx.fillStyle = 'black';
@@ -263,6 +335,7 @@ function update () {
   if(ship.thrusting && !ship.dead) {
     ship.thrust.x += SHIP_THRUST * Math.cos(ship.a) / FPS;
     ship.thrust.y -= SHIP_THRUST * Math.sin(ship.a) / FPS;
+    fxThrust.play();
 
     //draw the thruster
     if (!exploding && blinkOn) {
@@ -291,6 +364,7 @@ function update () {
   } else {
     ship.thrust.x -= FRICTION * ship.thrust.x / FPS;
     ship.thrust.y -= FRICTION * ship.thrust.y / FPS;
+    fxThrust.stop();
   }
 
   // draw the triangular ship
@@ -384,6 +458,20 @@ function update () {
   } else if (ship.dead) {
     newGame();
   }
+
+  // draw the score
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'white';
+  ctx.font = TEXT_SIZE + 'px sans-serif';
+  ctx.fillText(score, canva.width - SHIP_SIZE / 2, SHIP_SIZE);
+
+  // draw the high score
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'white';
+  ctx.font = (TEXT_SIZE * .7) + 'px sans-serif';
+  ctx.fillText('BEST: ' + highScore, canva.width / 2, SHIP_SIZE);
 
   // draw the lives
   let lifeColor;
@@ -566,7 +654,4 @@ function update () {
       roids[i].y = 0 - roids[i].r
     }
   }
-  // certer dot
-  // ctx.fillStyle = 'red';
-  // ctx.fillRect(ship.x - 1, ship.y - 1, 2, 2);
 }
