@@ -2,6 +2,8 @@
 const FPS = 30;
 // friction coefficient of space (0 = none, 1 = lots)
 const FRICTION = .7;
+// starting number of lifes
+const GAME_LIVES = 3;
 // maximum distance laser can travel as fraction of screen width
 const LASER_DIST = .6;
 // laser's explosion duration time in seconds
@@ -44,7 +46,7 @@ let canva = document.getElementById('gameCanvas');
 let ctx = canva.getContext('2d');
 
 // set up the game parameters
-let level, roids, ship, text, textAlpha;
+let level, roids, ship, text, textAlpha, lives;
 newGame();
 
 // set up event handlers
@@ -99,11 +101,40 @@ function distBetweenPoints(shipX, shipY, roidX, roidY){
   return Math.sqrt(Math.pow(shipX - roidX, 2) + Math.pow(shipY - roidY, 2))
 }
 
+function drawShip(x, y, a, color = 'white') {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = SHIP_SIZE / 20;
+  ctx.beginPath();
+  ctx.moveTo( // nose of the ship
+    x + 4 / 3 * ship.r * Math.cos(a),
+    y - 4 / 3 * ship.r * Math.sin(a)
+  );
+  ctx.lineTo( // rear left
+    x - ship.r * (2 / 3 * Math.cos(a) + Math.sin(a)),
+    y + ship.r * (2 / 3 * Math.sin(a) - Math.cos(a))
+  );
+  ctx.lineTo( // rear right
+    x - ship.r * (2 / 3 * Math.cos(a) - Math.sin(a)),
+    y + ship.r * (2 / 3 * Math.sin(a) + Math.cos(a))
+  );
+  ctx.closePath();
+  ctx.stroke();
+}
+
 function explodeShip() {
   ship.explodeTime = Math.ceil(SHIP_EXPLODE_DUR * FPS);
 }
 
+function gameOver() {
+  ship.dead = true;
+  text = 'Game Over';
+  textAlpha = 1.0;
+}
+
 function keyDown (/** @type {KeyboardEvent}*/ e){
+  if (ship.dead) {
+    return;
+  }
   switch(e.keyCode) {
     case 32: // space bar (shoot the laser)
       shootLaser();
@@ -122,6 +153,9 @@ function keyDown (/** @type {KeyboardEvent}*/ e){
 }
 
 function keyUp (/** @type {KeyboardEvent}*/ e){
+  if (ship.dead) {
+    return;
+  }
   switch(e.keyCode) {
     case 32: // space bar (allow shoot)
       ship.canShoot = true;
@@ -169,7 +203,7 @@ function newAsteroid(x, y, r) {
 
 function newGame() {
   level = 0;
-  // set up the spaceship object
+  lives = GAME_LIVES;
   ship = newShip();
   newLevel();
 }
@@ -189,6 +223,7 @@ function newShip() {
     blinkNum: Math.ceil(SHIP_INV_DUR / SHIP_BLINK_DUR),
     blinkTime: Math.ceil(SHIP_BLINK_DUR * FPS),
     canShoot: true,
+    dead: false,
     explodeTime: 0,
     lasers: [],
     rot: 0,
@@ -225,7 +260,7 @@ function update () {
   ctx.fillRect(0, 0, canva.width, canva.height);
 
   // thrust the ship
-  if(ship.thrusting) {
+  if(ship.thrusting && !ship.dead) {
     ship.thrust.x += SHIP_THRUST * Math.cos(ship.a) / FPS;
     ship.thrust.y -= SHIP_THRUST * Math.sin(ship.a) / FPS;
 
@@ -260,24 +295,8 @@ function update () {
 
   // draw the triangular ship
   if (!exploding) {
-    if (blinkOn) {
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = SHIP_SIZE / 20;
-      ctx.beginPath();
-      ctx.moveTo( // nose of the ship
-        ship.x + 4 / 3 * ship.r * Math.cos(ship.a),
-        ship.y - 4 / 3 * ship.r * Math.sin(ship.a)
-      );
-      ctx.lineTo( // rear left
-        ship.x - ship.r * (2 / 3 * Math.cos(ship.a) + Math.sin(ship.a)),
-        ship.y + ship.r * (2 / 3 * Math.sin(ship.a) - Math.cos(ship.a))
-      );
-      ctx.lineTo( // rear right
-        ship.x - ship.r * (2 / 3 * Math.cos(ship.a) - Math.sin(ship.a)),
-        ship.y + ship.r * (2 / 3 * Math.sin(ship.a) + Math.cos(ship.a))
-      );
-      ctx.closePath();
-      ctx.stroke();
+    if (blinkOn && !ship.dead) {
+      drawShip(ship.x, ship.y, ship.a);
     }
 
     // handle blinking
@@ -362,6 +381,15 @@ function update () {
     ctx.font = 'small-caps ' + TEXT_SIZE + 'px sans-serif';
     ctx.fillText(text, canva.width / 2, canva.height * .75);
     textAlpha -= (1.0 / TEXT_FADE_TIME / FPS);
+  } else if (ship.dead) {
+    newGame();
+  }
+
+  // draw the lives
+  let lifeColor;
+  for (let i = 0; i < lives; i++) {
+    lifeColor =( exploding && lives - 1) ? 'Red' : 'white';
+    drawShip(SHIP_SIZE + i * SHIP_SIZE * 1.2, SHIP_SIZE * 1.2, .5 * Math.PI, lifeColor);
   }
 
   // detect laser hits on asteroids
@@ -433,7 +461,7 @@ function update () {
   if (!exploding) {
 
     // only check when not blinking
-    if (ship.blinkNum == 0) {
+    if (ship.blinkNum == 0 && !ship.dead) {
       for (let i = 0; i < roids.length; i++) {
         if (distBetweenPoints(ship.x, ship.y, roids[i].x, roids[i].y) < ship.r + roids[i].r){
           explodeShip();
@@ -454,8 +482,15 @@ function update () {
   } else {
     ship.explodeTime--;
 
+    // reset the ship after the explosion has finished
     if (ship.explodeTime == 0){
-      ship = newShip();
+      lives--;
+      if (lives == 0) {
+        gameOver();
+      } else {
+        ship = newShip();
+      }
+      
     }
   }
   
